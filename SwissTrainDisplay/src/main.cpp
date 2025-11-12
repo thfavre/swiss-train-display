@@ -49,6 +49,7 @@ unsigned long lastDebounceTime = 0;
 const unsigned long debounceDelay = 50;
 const unsigned long longPressTime = 1000;
 bool buttonHandled = false;
+bool longPressTriggered = false; // Track if long press action already executed
 
 // ====== APPLICATION STATE ======
 enum AppState {
@@ -57,7 +58,7 @@ enum AppState {
   STATE_SETTINGS,
   STATE_WIFI_SCAN,
   STATE_WIFI_PASSWORD,
-  STATE_PRESET_CONFIG
+  STATE_PRESET_EDIT
 };
 
 AppState currentState = STATE_MAIN_DISPLAY;
@@ -82,6 +83,19 @@ Preset presets[4] = {
 
 int currentPreset = 0;
 int menuSelection = 0;
+
+// Preset editing
+enum PresetEditField {
+  EDIT_NAME,
+  EDIT_FROM,
+  EDIT_TO,
+  EDIT_SAVE,
+  EDIT_COUNT
+};
+int editingPreset = 0;
+int editField = 0;
+String editFieldInput = "";
+int editCharIndex = 0;
 
 // ====== TRAIN DATA ======
 struct TrainConnection {
@@ -110,13 +124,11 @@ const char keyboardChars[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWX
 const int numChars = strlen(keyboardChars);
 int charIndex = 0;
 String passwordInput = "";
-bool showPassword = false;
 bool showPasswordModal = false;
 int passwordModalSelection = 0; // 0=Delete, 1=Back, 2=Save
 
 // Menu definitions
 enum MenuOption {
-  MENU_CHANGE_PRESET,
   MENU_SETTINGS,
   MENU_REFRESH,
   MENU_EXIT,
@@ -125,7 +137,6 @@ enum MenuOption {
 
 enum SettingsOption {
   SETTINGS_WIFI,
-  SETTINGS_PRESETS,
   SETTINGS_BACK,
   SETTINGS_COUNT
 };
@@ -141,6 +152,7 @@ void displayMenu();
 void displaySettings();
 void displayWiFiScan();
 void displayPasswordEntry();
+void displayPresetEdit();
 void fetchTrainData();
 void parseTrainData(String json);
 void scanWiFiNetworks();
@@ -158,22 +170,20 @@ void handleShortPress() {
   
   switch(currentState) {
     case STATE_MAIN_DISPLAY:
-      // Enter menu
-      currentState = STATE_MENU;
-      menuSelection = 0;
-      encoderPos = 0;
-      lastDisplayedPos = 0;
+      // Short press on main screen opens preset editor for current preset
+      if (currentPreset != 3) { // Don't edit clock preset
+        editingPreset = currentPreset;
+        currentState = STATE_PRESET_EDIT;
+        editField = 0;
+        editFieldInput = "";
+        editCharIndex = 0;
+        encoderPos = 0;
+        lastDisplayedPos = 0;
+      }
       break;
       
     case STATE_MENU:
       switch(menuSelection) {
-        case MENU_CHANGE_PRESET:
-          currentPreset = (currentPreset + 1) % 4;
-          if (WiFi.status() == WL_CONNECTED && currentPreset != 3) {
-            fetchTrainData();
-          }
-          break;
-          
         case MENU_SETTINGS:
           currentState = STATE_SETTINGS;
           menuSelection = 0;
@@ -203,11 +213,6 @@ void handleShortPress() {
         case SETTINGS_WIFI:
           currentState = STATE_WIFI_SCAN;
           scanWiFiNetworks();
-          break;
-          
-        case SETTINGS_PRESETS:
-          // TODO: Implement preset configuration
-          currentState = STATE_PRESET_CONFIG;
           break;
           
         case SETTINGS_BACK:
@@ -262,6 +267,35 @@ void handleShortPress() {
         }
       }
       break;
+      
+    case STATE_PRESET_EDIT:
+      // Add character to current field or save
+      if (editField == EDIT_SAVE) {
+        // Apply all accumulated changes to the preset
+        // (changes were already applied as we typed)
+        saveSettings();
+        if (WiFi.status() == WL_CONNECTED && currentPreset != 3) {
+          fetchTrainData();
+        }
+        currentState = STATE_MAIN_DISPLAY;
+      } else {
+        // Add character to field and update preset immediately
+        if (editCharIndex < numChars) {
+          char newChar = keyboardChars[editCharIndex];
+          
+          // Update the appropriate field
+          if (editField == EDIT_NAME) {
+            presets[editingPreset].name += newChar;
+          } else if (editField == EDIT_FROM) {
+            presets[editingPreset].fromStation += newChar;
+          } else if (editField == EDIT_TO) {
+            presets[editingPreset].toStation += newChar;
+          }
+          
+          editFieldInput = ""; // Clear temp input since we applied it
+        }
+      }
+      break;
   }
 }
 
@@ -270,6 +304,14 @@ void handleLongPress() {
   Serial.println(currentState);
   
   switch(currentState) {
+    case STATE_MAIN_DISPLAY:
+      // Long press opens main menu
+      currentState = STATE_MENU;
+      menuSelection = 0;
+      encoderPos = 0;
+      lastDisplayedPos = 0;
+      break;
+      
     case STATE_WIFI_PASSWORD:
       // In password mode, long press opens modal menu
       if (!showPasswordModal) {
@@ -284,22 +326,42 @@ void handleLongPress() {
       }
       break;
       
+    case STATE_PRESET_EDIT:
+      // Delete last character from current field or go back
+      if (editField != EDIT_SAVE) {
+        String* currentField = nullptr;
+        if (editField == EDIT_NAME) currentField = &presets[editingPreset].name;
+        else if (editField == EDIT_FROM) currentField = &presets[editingPreset].fromStation;
+        else if (editField == EDIT_TO) currentField = &presets[editingPreset].toStation;
+        
+        if (currentField && currentField->length() > 0) {
+          currentField->remove(currentField->length() - 1);
+        } else {
+          // No more characters, go back
+          currentState = STATE_MAIN_DISPLAY;
+        }
+      } else {
+        // On save button, go back without saving
+        currentState = STATE_MAIN_DISPLAY;
+      }
+      break;
+      
     case STATE_MENU:
       currentState = STATE_MAIN_DISPLAY;
       break;
       
     case STATE_SETTINGS:
       currentState = STATE_MENU;
-      menuSelection = MENU_SETTINGS;
-      encoderPos = MENU_SETTINGS;
-      lastDisplayedPos = MENU_SETTINGS;
+      menuSelection = 0;
+      encoderPos = 0;
+      lastDisplayedPos = 0;
       break;
       
     case STATE_WIFI_SCAN:
       currentState = STATE_SETTINGS;
-      menuSelection = SETTINGS_WIFI;
-      encoderPos = SETTINGS_WIFI;
-      lastDisplayedPos = SETTINGS_WIFI;
+      menuSelection = 0;
+      encoderPos = 0;
+      lastDisplayedPos = 0;
       break;
       
     default:
@@ -309,6 +371,24 @@ void handleLongPress() {
 
 // ====== DISPLAY FUNCTIONS ======
 void updateDisplay() {
+  // Handle encoder on main display for preset switching
+  if (currentState == STATE_MAIN_DISPLAY) {
+    if (encoderPos != lastDisplayedPos) {
+      int diff = encoderPos - lastDisplayedPos;
+      currentPreset += diff;
+      
+      if (currentPreset < 0) currentPreset = 3;
+      if (currentPreset > 3) currentPreset = 0;
+      
+      lastDisplayedPos = encoderPos;
+      
+      // Fetch new data if switching to a train preset
+      if (WiFi.status() == WL_CONNECTED && currentPreset != 3) {
+        fetchTrainData();
+      }
+    }
+  }
+  
   switch(currentState) {
     case STATE_MAIN_DISPLAY:
       displayMainScreen();
@@ -324,6 +404,9 @@ void updateDisplay() {
       break;
     case STATE_WIFI_PASSWORD:
       displayPasswordEntry();
+      break;
+    case STATE_PRESET_EDIT:
+      displayPresetEdit();
       break;
   }
 }
@@ -420,7 +503,11 @@ void displayMainScreen() {
   // Footer hint
   display.setCursor(2, 56);
   display.setTextSize(1);
-  display.print("Press=Menu");
+  if (currentPreset != 3) {
+    display.print("Turn=Switch Hold=Menu");
+  } else {
+    display.print("Hold for Menu");
+  }
   
   display.display();
 }
@@ -446,22 +533,17 @@ void displayMenu() {
   display.setCursor(2, 2);
   display.print("MAIN MENU");
   
-  // Instructions
-  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(2, 56);
-  display.print("Turn=Nav Hold=Back");
   
   // Menu items
   String menuItems[] = {
-    "Switch Route",
     "Settings",
     "Refresh Data",
     "< Back"
   };
   
-  int itemHeight = 10;
-  int startY = 14;
+  int itemHeight = 15;
+  int startY = 16;
   
   for (int i = 0; i < MENU_COUNT; i++) {
     int yPos = startY + (i * itemHeight);
@@ -470,11 +552,11 @@ void displayMenu() {
       // Highlight selected item
       display.fillRect(0, yPos, SCREEN_WIDTH, itemHeight, SSD1306_WHITE);
       display.setTextColor(SSD1306_BLACK);
-      display.setCursor(4, yPos + 1);
+      display.setCursor(4, yPos + 3);
       display.print("> ");
     } else {
       display.setTextColor(SSD1306_WHITE);
-      display.setCursor(8, yPos + 1);
+      display.setCursor(8, yPos + 3);
     }
     
     display.print(menuItems[i]);
@@ -504,21 +586,16 @@ void displaySettings() {
   display.setCursor(2, 2);
   display.print("SETTINGS");
   
-  // Instructions
-  display.setTextSize(1);
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(2, 56);
-  display.print("Turn=Nav Hold=Back");
   
   // Settings items
   String settingsItems[] = {
     "WiFi Setup",
-    "Edit Routes",
     "< Back to Menu"
   };
   
-  int itemHeight = 13;
-  int startY = 15;
+  int itemHeight = 20;
+  int startY = 18;
   
   for (int i = 0; i < SETTINGS_COUNT; i++) {
     int yPos = startY + (i * itemHeight);
@@ -526,21 +603,14 @@ void displaySettings() {
     if (i == menuSelection) {
       display.fillRect(0, yPos, SCREEN_WIDTH, itemHeight, SSD1306_WHITE);
       display.setTextColor(SSD1306_BLACK);
-      display.setCursor(4, yPos + 2);
+      display.setCursor(4, yPos + 5);
       display.print("> ");
     } else {
       display.setTextColor(SSD1306_WHITE);
-      display.setCursor(8, yPos + 2);
+      display.setCursor(8, yPos + 5);
     }
     
     display.print(settingsItems[i]);
-  }
-  
-  // Show current WiFi status
-  if (menuSelection == SETTINGS_WIFI) {
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    // No extra info needed, keeps it clean
   }
   
   display.display();
@@ -567,17 +637,14 @@ void displayWiFiScan() {
   display.setCursor(2, 2);
   display.print("WiFi Networks");
   
-  // Instructions
   display.setTextColor(SSD1306_WHITE);
-  display.setCursor(2, 56);
-  display.print("Turn=Nav Hold=Back");
   
   if (wifiNetworkCount == 0) {
     drawCenteredText("No networks found", 28);
   } else {
-    // Show up to 4 networks
-    int visibleStart = max(0, menuSelection - 1);
-    int visibleEnd = min(wifiNetworkCount, visibleStart + 4);
+    // Show up to 5 networks
+    int visibleStart = max(0, menuSelection - 2);
+    int visibleEnd = min(wifiNetworkCount, visibleStart + 5);
     
     int itemHeight = 10;
     int startY = 14;
@@ -599,9 +666,9 @@ void displayWiFiScan() {
     }
     
     // Scroll indicator
-    if (wifiNetworkCount > 4) {
+    if (wifiNetworkCount > 5) {
       display.setTextColor(SSD1306_WHITE);
-      int scrollY = 14 + ((menuSelection * 30) / wifiNetworkCount);
+      int scrollY = 14 + ((menuSelection * 40) / wifiNetworkCount);
       display.fillRect(126, scrollY, 2, 8, SSD1306_WHITE);
     }
   }
@@ -655,11 +722,6 @@ void displayPasswordEntry() {
       display.print(options[i]);
     }
     
-    // Instructions
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(2, 56);
-    display.print("Turn=Nav Press=OK");
-    
   } else {
     // Normal password entry mode
     
@@ -682,17 +744,14 @@ void displayPasswordEntry() {
     display.setCursor(2, 2);
     display.print(wifiSSID.substring(0, 15));
     
-    // Password display area
+    // Password display area - SHOW ACTUAL TEXT
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(2, 14);
     display.print("Pass: ");
     
-    // Show password (last 10 chars as dots)
-    String displayPass = "";
+    // Show actual password (last 10 chars)
     int passLen = passwordInput.length();
-    for (int i = max(0, passLen - 10); i < passLen; i++) {
-      displayPass += "*";
-    }
+    String displayPass = passwordInput.substring(max(0, passLen - 10));
     display.print(displayPass);
     display.print("_"); // Cursor
     
@@ -726,7 +785,88 @@ void displayPasswordEntry() {
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
     display.setCursor(2, 56);
-    display.print("Pr=Add Hold=Menu");
+    display.print("Hold=Menu");
+  }
+  
+  display.display();
+}
+
+void displayPresetEdit() {
+  // Handle encoder navigation
+  if (encoderPos != lastDisplayedPos) {
+    int diff = encoderPos - lastDisplayedPos;
+    
+    // If navigating between fields
+    if (diff > 5 || diff < -5 || editField == EDIT_SAVE) {
+      editField += (diff > 0 ? 1 : -1);
+      if (editField < 0) editField = EDIT_COUNT - 1;
+      if (editField >= EDIT_COUNT) editField = 0;
+      encoderPos = 0; // Reset encoder for character selection
+    } else {
+      // Navigate characters within current field
+      if (editField != EDIT_SAVE) {
+        editCharIndex += diff;
+        if (editCharIndex < 0) editCharIndex = numChars - 1;
+        if (editCharIndex >= numChars) editCharIndex = 0;
+      }
+    }
+    
+    lastDisplayedPos = encoderPos;
+  }
+  
+  display.clearDisplay();
+  
+  // Title bar
+  display.fillRect(0, 0, SCREEN_WIDTH, 11, SSD1306_WHITE);
+  display.setTextSize(1);
+  display.setTextColor(SSD1306_BLACK);
+  display.setCursor(2, 2);
+  display.print("Edit Route ");
+  display.print(editingPreset + 1);
+  
+  display.setTextColor(SSD1306_WHITE);
+  
+  // Field labels and values
+  String fieldNames[] = {"Name:", "From:", "To:", "< Save"};
+  int yPositions[] = {14, 26, 38, 52};
+  
+  for (int i = 0; i < EDIT_COUNT; i++) {
+    int yPos = yPositions[i];
+    
+    if (i == editField) {
+      display.setTextColor(SSD1306_BLACK);
+      display.fillRect(0, yPos - 1, SCREEN_WIDTH, 11, SSD1306_WHITE);
+    } else {
+      display.setTextColor(SSD1306_WHITE);
+    }
+    
+    display.setCursor(2, yPos);
+    display.print(fieldNames[i]);
+    
+    if (i != EDIT_SAVE) {
+      display.print(" ");
+      String* currentField = nullptr;
+      if (i == EDIT_NAME) currentField = &presets[editingPreset].name;
+      else if (i == EDIT_FROM) currentField = &presets[editingPreset].fromStation;
+      else if (i == EDIT_TO) currentField = &presets[editingPreset].toStation;
+      
+      if (currentField) {
+        // Show current value
+        String displayText = *currentField;
+        if (i == editField) {
+          // Show last 6 chars + character selector
+          displayText = displayText.substring(max(0, (int)displayText.length() - 6));
+          display.print(displayText);
+          display.print("[");
+          display.print(keyboardChars[editCharIndex]);
+          display.print("]");
+        } else {
+          // Show first 10 chars
+          displayText = displayText.substring(0, 10);
+          display.print(displayText);
+        }
+      }
+    }
   }
   
   display.display();
@@ -969,6 +1109,11 @@ void setup() {
     
     if (WiFi.status() == WL_CONNECTED) {
       Serial.println("\nWiFi Connected!");
+      
+      // Configure time with NTP
+      configTime(3600, 3600, "pool.ntp.org", "time.nist.gov"); // GMT+1 with DST for Switzerland
+      Serial.println("Syncing time with NTP...");
+      
       display.clearDisplay();
       drawCenteredText("WiFi Connected!", 28);
       display.display();
@@ -1035,22 +1180,32 @@ void handleButton() {
       
       if (buttonState == LOW && !buttonHandled) {
         buttonPressTime = millis();
+        longPressTriggered = false;
       }
       
       if (buttonState == HIGH && !buttonHandled) {
         unsigned long pressDuration = millis() - buttonPressTime;
         
-        if (pressDuration >= longPressTime) {
-          Serial.println("Long press detected");
-          handleLongPress();
-        } else {
+        // Only trigger short press if long press wasn't already triggered
+        if (!longPressTriggered && pressDuration < longPressTime) {
           Serial.println("Short press detected");
           handleShortPress();
         }
         buttonHandled = true;
+        longPressTriggered = false;
       }
     } else if (buttonState == HIGH) {
       buttonHandled = false;
+    }
+    
+    // Check for long press WHILE button is still held
+    if (buttonState == LOW && !longPressTriggered && !buttonHandled) {
+      if (millis() - buttonPressTime >= longPressTime) {
+        Serial.println("Long press detected (while held)");
+        handleLongPress();
+        longPressTriggered = true;
+        buttonHandled = true;
+      }
     }
   }
   
