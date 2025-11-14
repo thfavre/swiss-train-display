@@ -30,27 +30,29 @@ void ButtonHandler::update() {
       currentState = reading;
 
       // Button pressed (LOW because of pullup)
-      if (currentState == LOW && !eventHandled) {
-        isPressed = true;
-        pressStartTime = millis();
-        longPressTriggered = false;
+      if (currentState == LOW) {
+        if (!isPressed) {
+          isPressed = true;
+          pressStartTime = millis();
+          longPressTriggered = false;
+          eventHandled = false;
+          Serial.println("Button pressed");
+        }
       }
 
       // Button released
       if (currentState == HIGH && isPressed) {
+        Serial.println("Button released");
         isPressed = false;
-        eventHandled = false;
-        longPressTriggered = false;
+        // Don't reset eventHandled here - let getEvent() consume it
       }
-    } else if (currentState == HIGH) {
-      eventHandled = false;
     }
 
     // Check for long press while button is held
     if (isPressed && !longPressTriggered && !eventHandled) {
       if (millis() - pressStartTime >= LONG_PRESS_MS) {
         longPressTriggered = true;
-        eventHandled = true;
+        Serial.println("Long press threshold reached");
       }
     }
   }
@@ -65,15 +67,20 @@ ButtonEvent ButtonHandler::getEvent() {
   if (longPressTriggered && !eventHandled) {
     event = BUTTON_LONG_PRESS;
     eventHandled = true;
-    Serial.println("Button: LONG PRESS");
+    Serial.println("Button: LONG PRESS event returned");
   }
   // Short press detected (button released without long press)
-  else if (!isPressed && !longPressTriggered && !eventHandled) {
+  else if (!isPressed && !longPressTriggered && !eventHandled && pressStartTime > 0) {
     unsigned long pressDuration = millis() - pressStartTime;
     if (pressDuration > BUTTON_DEBOUNCE_MS && pressDuration < LONG_PRESS_MS) {
       event = BUTTON_SHORT_PRESS;
       eventHandled = true;
-      Serial.println("Button: SHORT PRESS");
+      pressStartTime = 0;  // Reset to prevent re-triggering
+      Serial.println("Button: SHORT PRESS event returned");
+    } else if (pressDuration >= LONG_PRESS_MS) {
+      // Was a long press but already handled, just clean up
+      eventHandled = true;
+      pressStartTime = 0;
     }
   }
 
@@ -82,7 +89,7 @@ ButtonEvent ButtonHandler::getEvent() {
 
 bool ButtonHandler::hasEvent() const {
   return (longPressTriggered && !eventHandled) ||
-         (!isPressed && !longPressTriggered && !eventHandled);
+         (!isPressed && !longPressTriggered && !eventHandled && pressStartTime > 0);
 }
 
 unsigned long ButtonHandler::getPressDuration() const {

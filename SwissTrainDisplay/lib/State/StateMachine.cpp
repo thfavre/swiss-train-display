@@ -41,20 +41,33 @@ void StateMachine::update() {
     return;
   }
 
-  // Update current screen
+  bool needsRedraw = false;
+
+  // Update current screen (may set internal redraw flag)
   currentScreen->update();
+
+  // Check if screen requested redraw (e.g., clock ticking)
+  if (currentScreen->needsRedrawNow()) {
+    needsRedraw = true;
+    currentScreen->clearRedrawFlag();
+  }
 
   // Handle input
   int encoderDelta = encoder->getDelta();
   if (encoderDelta != 0) {
+    Serial.print("Encoder delta: ");
+    Serial.println(encoderDelta);
     currentScreen->handleEncoder(encoderDelta);
+    needsRedraw = true;  // Redraw when encoder moves
   }
 
   ButtonEvent buttonEvent = button->getEvent();
   if (buttonEvent == BUTTON_SHORT_PRESS) {
     currentScreen->handleShortPress();
+    needsRedraw = true;  // Redraw on button press
   } else if (buttonEvent == BUTTON_LONG_PRESS) {
     currentScreen->handleLongPress();
+    needsRedraw = true;  // Redraw on button press
   }
 
   // Check for state change request
@@ -66,7 +79,7 @@ void StateMachine::update() {
     if (currentState == STATE_WIFI_SCAN && nextState == STATE_WIFI_PASSWORD) {
       // Pass selected network to password entry screen
       WiFiScanScreen* wifiScan = (WiFiScanScreen*)currentScreen;
-      int networkIndex = wifiScan->getSelected();  // We need to add this method
+      int networkIndex = wifiScan->getSelected();
       const WiFiNetwork* network = wifi->getNetwork(networkIndex);
       if (network) {
         selectedSSID = network->ssid;
@@ -76,10 +89,13 @@ void StateMachine::update() {
     }
 
     setState(nextState);
+    needsRedraw = true;  // Redraw on state change
   }
 
-  // Draw current screen
-  currentScreen->draw();
+  // Draw only when something changed
+  if (needsRedraw) {
+    currentScreen->draw();
+  }
 }
 
 void StateMachine::setState(AppState newState) {
@@ -104,4 +120,7 @@ void StateMachine::setState(AppState newState) {
 
   // Enter new screen
   currentScreen->enter();
+
+  // Draw the new screen immediately
+  currentScreen->draw();
 }

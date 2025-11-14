@@ -20,12 +20,24 @@ void MainScreen::exit() {
 }
 
 void MainScreen::update() {
-  // Auto-refresh train data periodically
   const Preset* current = presets->getCurrent();
+
+  // Auto-refresh train data periodically
   if (current && current->type == PRESET_TRAIN && wifi->isConnected()) {
     if (!trainAPI->isCacheValid()) {
       TrainConnection conn;
       trainAPI->fetchConnection(current->fromStation, current->toStation, conn);
+      requestRedraw();  // Redraw when new data arrives
+    }
+  }
+
+  // Clock needs to update every second
+  if (current && current->type == PRESET_CLOCK) {
+    static unsigned long lastClockUpdate = 0;
+    unsigned long now = millis();
+    if (now - lastClockUpdate >= 1000) {  // Every 1 second
+      lastClockUpdate = now;
+      requestRedraw();
     }
   }
 }
@@ -66,14 +78,10 @@ void MainScreen::draw() {
 
   const Preset* current = presets->getCurrent();
   if (!current) {
-    Serial.println("MainScreen: No preset found!");
     display->drawCenteredText("No presets", 28, 1);
     display->show();
     return;
   }
-
-  Serial.print("MainScreen: Drawing preset type ");
-  Serial.println(current->type);
 
   // Draw based on preset type
   switch (current->type) {
@@ -98,11 +106,8 @@ void MainScreen::drawTrainDisplay() {
   const Preset* current = presets->getCurrent();
   Adafruit_SSD1306& d = display->getDisplay();
 
-  Serial.println("Drawing train display");
-
   // Yellow zone: Route information
   String route = current->fromStation + " -> " + current->toStation;
-  Serial.println("Route: " + route);
   YellowBar::draw(*display, route, true, wifi->isConnected());
 
   // Blue zone: Train info
@@ -110,13 +115,10 @@ void MainScreen::drawTrainDisplay() {
 
   if (!trainAPI->hasCachedData()) {
     // No data yet
-    Serial.println("No cached train data");
     if (!wifi->isConnected()) {
-      Serial.println("Drawing: No WiFi");
       display->drawCenteredText("No WiFi", 30, 1);
       display->drawCenteredText("Long press for menu", 42, 1);
     } else {
-      Serial.println("Drawing: Loading");
       display->drawCenteredText("Loading...", 35, 1);
     }
   } else if (conn.isCancelled) {

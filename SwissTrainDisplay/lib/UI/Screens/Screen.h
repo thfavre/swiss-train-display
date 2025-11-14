@@ -19,6 +19,7 @@ protected:
   DisplayManager* display;
   AppState nextState;  // State to transition to (if any)
   bool requestStateChange;
+  bool needsRedraw;    // Flag to request redraw
 
 public:
   Screen(DisplayManager* disp);
@@ -42,10 +43,18 @@ public:
   AppState getNextState() const { return nextState; }
   void clearStateChangeRequest() { requestStateChange = false; }
 
+  // Redraw management
+  bool needsRedrawNow() const { return needsRedraw; }
+  void clearRedrawFlag() { needsRedraw = false; }
+
 protected:
   void requestState(AppState state) {
     nextState = state;
     requestStateChange = true;
+  }
+
+  void requestRedraw() {
+    needsRedraw = true;
   }
 };
 
