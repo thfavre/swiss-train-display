@@ -40,6 +40,9 @@ Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
 volatile int encoderPos = 0;
 volatile int lastEncoded = 0;
 int lastDisplayedPos = 0;
+volatile unsigned long lastEncoderTime = 0;
+const unsigned long encoderDebounce = 5; // Milliseconds between encoder changes
+volatile int encoderRawCount = 0; // Raw count before dividing by 2
 
 // Button handling
 int buttonState = HIGH;
@@ -94,6 +97,7 @@ enum PresetEditField {
 };
 int editingPreset = 0;
 int editField = 0;
+bool editingFieldActive = false; // Track if we're actively editing a field
 String editFieldInput = "";
 int editCharIndex = 0;
 
@@ -125,7 +129,9 @@ const int numChars = strlen(keyboardChars);
 int charIndex = 0;
 String passwordInput = "";
 bool showPasswordModal = false;
-int passwordModalSelection = 0; // 0=Delete, 1=Back, 2=Save
+int passwordModalSelection = 0; // 0=Del, 1=Save, 2=Edit, 3=Exit
+bool showPresetModal = false;
+int presetModalSelection = 0; // 0=Del, 1=Save, 2=Cancel
 
 // Menu definitions
 enum MenuOption {
@@ -175,6 +181,8 @@ void handleShortPress() {
         editingPreset = currentPreset;
         currentState = STATE_PRESET_EDIT;
         editField = 0;
+        editingFieldActive = false;
+        showPresetModal = false;
         editFieldInput = "";
         editCharIndex = 0;
         encoderPos = 0;
@@ -240,23 +248,28 @@ void handleShortPress() {
       if (showPasswordModal) {
         // Handle modal selection
         switch(passwordModalSelection) {
-          case 0: // Delete
+          case 0: // Del
             if (passwordInput.length() > 0) {
               passwordInput.remove(passwordInput.length() - 1);
               Serial.println("Deleted char, password now: " + passwordInput);
             }
-            showPasswordModal = false;
+            // Stay in modal (don't close it)
             break;
-          case 1: // Back
+          case 1: // Save & Connect
+            showPasswordModal = false;
+            connectToWiFi();
+            break;
+          case 2: // Edit (go back to password entry)
+            showPasswordModal = false;
+            encoderPos = charIndex;
+            lastDisplayedPos = charIndex;
+            break;
+          case 3: // Exit
             currentState = STATE_WIFI_SCAN;
             menuSelection = selectedNetwork;
             encoderPos = selectedNetwork;
             lastDisplayedPos = selectedNetwork;
             showPasswordModal = false;
-            break;
-          case 2: // Save & Connect
-            showPasswordModal = false;
-            connectToWiFi();
             break;
         }
       } else {
@@ -269,19 +282,50 @@ void handleShortPress() {
       break;
       
     case STATE_PRESET_EDIT:
-      // Add character to current field or save
-      if (editField == EDIT_SAVE) {
-        // Apply all accumulated changes to the preset
-        // (changes were already applied as we typed)
-        saveSettings();
-        if (WiFi.status() == WL_CONNECTED && currentPreset != 3) {
-          fetchTrainData();
+      if (showPresetModal) {
+        // Handle modal selection
+        switch(presetModalSelection) {
+          case 0: // Del - delete last character
+            if (editingFieldActive) {
+              String* currentField = nullptr;
+              if (editField == EDIT_NAME) currentField = &presets[editingPreset].name;
+              else if (editField == EDIT_FROM) currentField = &presets[editingPreset].fromStation;
+              else if (editField == EDIT_TO) currentField = &presets[editingPreset].toStation;
+              
+              if (currentField && currentField->length() > 0) {
+                currentField->remove(currentField->length() - 1);
+                Serial.println("Deleted char from field");
+              }
+            }
+            // Stay in modal (don't close it)
+            break;
+          case 1: // Save
+            saveSettings();
+            if (WiFi.status() == WL_CONNECTED && editingPreset != 3) {
+              fetchTrainData();
+            }
+            showPresetModal = false;
+            editingFieldActive = false;
+            currentState = STATE_MAIN_DISPLAY;
+            break;
+          case 2: // Cancel
+            showPresetModal = false;
+            encoderPos = editCharIndex;
+            lastDisplayedPos = editCharIndex;
+            break;
         }
-        currentState = STATE_MAIN_DISPLAY;
-      } else {
-        // Add character to field and update preset immediately
+      } else if (editingFieldActive) {
+        // We're actively editing - add character
         if (editCharIndex < numChars) {
           char newChar = keyboardChars[editCharIndex];
+          
+          // Auto-capitalize first letter for From/To fields
+          if ((editField == EDIT_FROM || editField == EDIT_TO)) {
+            String* currentField = (editField == EDIT_FROM) ? &presets[editingPreset].fromStation : &presets[editingPreset].toStation;
+            if (currentField->length() == 0 && newChar >= 'a' && newChar <= 'z') {
+              newChar = newChar - 32; // Convert to uppercase
+            }
+          }
           
           // Update the appropriate field
           if (editField == EDIT_NAME) {
@@ -292,7 +336,27 @@ void handleShortPress() {
             presets[editingPreset].toStation += newChar;
           }
           
-          editFieldInput = ""; // Clear temp input since we applied it
+          Serial.print("Added char '");
+          Serial.print(newChar);
+          Serial.println("' to field");
+        }
+      } else {
+        // Not editing yet - enter edit mode or save
+        if (editField == EDIT_SAVE) {
+          // Save and exit
+          saveSettings();
+          if (WiFi.status() == WL_CONNECTED && currentPreset != 3) {
+            fetchTrainData();
+          }
+          currentState = STATE_MAIN_DISPLAY;
+        } else {
+          // Enter edit mode for selected field
+          editingFieldActive = true;
+          editCharIndex = 0;
+          encoderPos = 0;
+          lastDisplayedPos = 0;
+          Serial.print("Entering edit mode for field ");
+          Serial.println(editField);
         }
       }
       break;
@@ -313,7 +377,7 @@ void handleLongPress() {
       break;
       
     case STATE_WIFI_PASSWORD:
-      // In password mode, long press opens modal menu
+      // Long press opens modal menu with confirmation
       if (!showPasswordModal) {
         showPasswordModal = true;
         passwordModalSelection = 0;
@@ -327,21 +391,20 @@ void handleLongPress() {
       break;
       
     case STATE_PRESET_EDIT:
-      // Delete last character from current field or go back
-      if (editField != EDIT_SAVE) {
-        String* currentField = nullptr;
-        if (editField == EDIT_NAME) currentField = &presets[editingPreset].name;
-        else if (editField == EDIT_FROM) currentField = &presets[editingPreset].fromStation;
-        else if (editField == EDIT_TO) currentField = &presets[editingPreset].toStation;
-        
-        if (currentField && currentField->length() > 0) {
-          currentField->remove(currentField->length() - 1);
-        } else {
-          // No more characters, go back
-          currentState = STATE_MAIN_DISPLAY;
-        }
+      if (showPresetModal) {
+        // Close modal
+        showPresetModal = false;
+        encoderPos = editCharIndex;
+        lastDisplayedPos = editCharIndex;
+      } else if (editingFieldActive) {
+        // Open modal while editing
+        showPresetModal = true;
+        presetModalSelection = 0;
+        encoderPos = 0;
+        lastDisplayedPos = 0;
+        Serial.println("Opening preset edit modal");
       } else {
-        // On save button, go back without saving
+        // Not in edit mode, go back to main display
         currentState = STATE_MAIN_DISPLAY;
       }
       break;
@@ -498,15 +561,6 @@ void displayMainScreen() {
         display.print(currentConnection.trainNumber);
       }
     }
-  }
-  
-  // Footer hint
-  display.setCursor(2, 56);
-  display.setTextSize(1);
-  if (currentPreset != 3) {
-    display.print("Turn=Switch Hold=Menu");
-  } else {
-    display.print("Hold for Menu");
   }
   
   display.display();
@@ -686,39 +740,66 @@ void displayPasswordEntry() {
       int diff = encoderPos - lastDisplayedPos;
       passwordModalSelection += diff;
       
-      if (passwordModalSelection < 0) passwordModalSelection = 2;
-      if (passwordModalSelection > 2) passwordModalSelection = 0;
+      if (passwordModalSelection < 0) passwordModalSelection = 3;
+      if (passwordModalSelection > 3) passwordModalSelection = 0;
       
       lastDisplayedPos = encoderPos;
     }
     
-    // Draw semi-transparent background (just a border)
-    display.drawRect(10, 10, 108, 44, SSD1306_WHITE);
-    display.drawRect(11, 11, 106, 42, SSD1306_WHITE);
+    // Fill entire screen with black for modal
+    display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
     
-    // Modal title
+    // Draw border
+    display.drawRect(2, 2, SCREEN_WIDTH - 4, SCREEN_HEIGHT - 4, SSD1306_WHITE);
+    
+    // Modal text
     display.setTextSize(1);
     display.setTextColor(SSD1306_WHITE);
-    display.setCursor(40, 14);
-    display.print("OPTIONS");
     
-    // Modal options
-    String options[] = {"Delete Char", "< Cancel", "Save & Connect"};
-    int startY = 24;
+    // Line 1: "Connect to WiFi"
+    display.setCursor(4, 6);
+    display.print("Connect to WiFi:");
     
-    for (int i = 0; i < 3; i++) {
-      int yPos = startY + (i * 10);
+    // Line 2: SSID (truncate if needed)
+    display.setCursor(4, 16);
+    String displaySSID = wifiSSID;
+    if (displaySSID.length() > 20) {
+      displaySSID = displaySSID.substring(0, 17) + "...";
+    }
+    display.print(displaySSID);
+    
+    // Line 3: "with password:"
+    display.setCursor(4, 26);
+    display.print("with password:");
+    
+    // Line 4: Password (show asterisks or truncated)
+    display.setCursor(4, 36);
+    String displayPass = passwordInput;
+    if (displayPass.length() > 20) {
+      displayPass = "..." + displayPass.substring(displayPass.length() - 17);
+    }
+    display.print(displayPass);
+    
+    // Draw line separator
+    display.drawLine(4, 44, SCREEN_WIDTH - 4, 44, SSD1306_WHITE);
+    
+    // Modal options - 4 options in 2 rows
+    String options[] = {"Del", "Save", "Edit", "Exit"};
+    
+    for (int i = 0; i < 4; i++) {
+      int row = i / 2;
+      int col = i % 2;
+      int xPos = 10 + (col * 60);
+      int yPos = 48 + (row * 10);
       
       if (i == passwordModalSelection) {
-        display.fillRect(14, yPos - 1, 100, 9, SSD1306_WHITE);
+        display.fillRect(xPos - 2, yPos - 2, 30, 10, SSD1306_WHITE);
         display.setTextColor(SSD1306_BLACK);
-        display.setCursor(16, yPos);
-        display.print(">");
       } else {
         display.setTextColor(SSD1306_WHITE);
       }
       
-      display.setCursor(24, yPos);
+      display.setCursor(xPos, yPos);
       display.print(options[i]);
     }
     
@@ -781,89 +862,221 @@ void displayPasswordEntry() {
       display.print(keyboardChars[idx]);
     }
     
-    // Instructions
-    display.setTextSize(1);
-    display.setTextColor(SSD1306_WHITE);
-    display.setCursor(2, 56);
-    display.print("Hold=Menu");
   }
   
   display.display();
 }
 
 void displayPresetEdit() {
-  // Handle encoder navigation
-  if (encoderPos != lastDisplayedPos) {
-    int diff = encoderPos - lastDisplayedPos;
-    
-    // If navigating between fields
-    if (diff > 5 || diff < -5 || editField == EDIT_SAVE) {
-      editField += (diff > 0 ? 1 : -1);
-      if (editField < 0) editField = EDIT_COUNT - 1;
-      if (editField >= EDIT_COUNT) editField = 0;
-      encoderPos = 0; // Reset encoder for character selection
-    } else {
-      // Navigate characters within current field
-      if (editField != EDIT_SAVE) {
-        editCharIndex += diff;
-        if (editCharIndex < 0) editCharIndex = numChars - 1;
-        if (editCharIndex >= numChars) editCharIndex = 0;
-      }
-    }
-    
-    lastDisplayedPos = encoderPos;
-  }
-  
   display.clearDisplay();
   
-  // Title bar
-  display.fillRect(0, 0, SCREEN_WIDTH, 11, SSD1306_WHITE);
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_BLACK);
-  display.setCursor(2, 2);
-  display.print("Edit Route ");
-  display.print(editingPreset + 1);
-  
-  display.setTextColor(SSD1306_WHITE);
-  
-  // Field labels and values
-  String fieldNames[] = {"Name:", "From:", "To:", "< Save"};
-  int yPositions[] = {14, 26, 38, 52};
-  
-  for (int i = 0; i < EDIT_COUNT; i++) {
-    int yPos = yPositions[i];
-    
-    if (i == editField) {
-      display.setTextColor(SSD1306_BLACK);
-      display.fillRect(0, yPos - 1, SCREEN_WIDTH, 11, SSD1306_WHITE);
-    } else {
-      display.setTextColor(SSD1306_WHITE);
+  if (showPresetModal) {
+    // Handle encoder for modal navigation
+    if (encoderPos != lastDisplayedPos) {
+      int diff = encoderPos - lastDisplayedPos;
+      presetModalSelection += diff;
+      
+      if (presetModalSelection < 0) presetModalSelection = 2;
+      if (presetModalSelection > 2) presetModalSelection = 0;
+      
+      lastDisplayedPos = encoderPos;
     }
     
-    display.setCursor(2, yPos);
-    display.print(fieldNames[i]);
+    // Fill entire screen with black for modal
+    display.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
     
-    if (i != EDIT_SAVE) {
-      display.print(" ");
-      String* currentField = nullptr;
-      if (i == EDIT_NAME) currentField = &presets[editingPreset].name;
-      else if (i == EDIT_FROM) currentField = &presets[editingPreset].fromStation;
-      else if (i == EDIT_TO) currentField = &presets[editingPreset].toStation;
+    // Draw border
+    display.drawRect(2, 2, SCREEN_WIDTH - 4, SCREEN_HEIGHT - 4, SSD1306_WHITE);
+    
+    // Modal text
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    
+    display.setCursor(4, 10);
+    display.print("Edit field:");
+    
+    String fieldName = "";
+    String* currentField = nullptr;
+    if (editField == EDIT_NAME) {
+      fieldName = "Name";
+      currentField = &presets[editingPreset].name;
+    } else if (editField == EDIT_FROM) {
+      fieldName = "From";
+      currentField = &presets[editingPreset].fromStation;
+    } else if (editField == EDIT_TO) {
+      fieldName = "To";
+      currentField = &presets[editingPreset].toStation;
+    }
+    
+    display.setCursor(4, 20);
+    display.print(fieldName);
+    display.print(": ");
+    if (currentField) {
+      String displayText = *currentField;
+      if (displayText.length() > 15) {
+        displayText = displayText.substring(0, 12) + "...";
+      }
+      display.print(displayText);
+    }
+    
+    // Draw line separator
+    display.drawLine(4, 32, SCREEN_WIDTH - 4, 32, SSD1306_WHITE);
+    
+    // Modal options
+    String options[] = {"Del", "Save", "Cancel"};
+    
+    for (int i = 0; i < 3; i++) {
+      int yPos = 38 + (i * 10);
       
-      if (currentField) {
-        // Show current value
-        String displayText = *currentField;
-        if (i == editField) {
-          // Show last 6 chars + character selector
-          displayText = displayText.substring(max(0, (int)displayText.length() - 6));
-          display.print(displayText);
-          display.print("[");
-          display.print(keyboardChars[editCharIndex]);
-          display.print("]");
-        } else {
-          // Show first 10 chars
+      if (i == presetModalSelection) {
+        display.fillRect(8, yPos - 2, 50, 10, SSD1306_WHITE);
+        display.setTextColor(SSD1306_BLACK);
+      } else {
+        display.setTextColor(SSD1306_WHITE);
+      }
+      
+      display.setCursor(10, yPos);
+      display.print(options[i]);
+    }
+  } else if (editingFieldActive) {
+    // Keyboard mode - similar to password entry
+    
+    // Handle encoder for character selection
+    if (encoderPos != lastDisplayedPos) {
+      int diff = encoderPos - lastDisplayedPos;
+      editCharIndex += diff;
+      
+      // Determine character set based on field
+      int maxChars = numChars;
+      if (editField == EDIT_FROM || editField == EDIT_TO) {
+        // Only lowercase letters for station names
+        maxChars = 26; // a-z
+      }
+      
+      // Wrap around character list
+      if (editCharIndex < 0) editCharIndex = maxChars - 1;
+      if (editCharIndex >= maxChars) editCharIndex = 0;
+      
+      lastDisplayedPos = encoderPos;
+    }
+    
+    // Title bar
+    display.fillRect(0, 0, SCREEN_WIDTH, 11, SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_BLACK);
+    display.setCursor(2, 2);
+    String fieldName = "";
+    if (editField == EDIT_NAME) fieldName = "Name";
+    else if (editField == EDIT_FROM) fieldName = "From";
+    else if (editField == EDIT_TO) fieldName = "To";
+    display.print("Edit " + fieldName);
+    
+    // Current field value
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(2, 14);
+    String* currentField = nullptr;
+    if (editField == EDIT_NAME) currentField = &presets[editingPreset].name;
+    else if (editField == EDIT_FROM) currentField = &presets[editingPreset].fromStation;
+    else if (editField == EDIT_TO) currentField = &presets[editingPreset].toStation;
+    
+    if (currentField) {
+      String displayText = *currentField;
+      int txtLen = displayText.length();
+      String visibleText = displayText.substring(max(0, txtLen - 12));
+      display.print(visibleText);
+      display.print("_"); // Cursor
+    }
+    
+    // Character selector area
+    display.setTextSize(1);
+    display.setCursor(2, 28);
+    display.print("Select character:");
+    
+    // Show 5 characters
+    display.setTextSize(2);
+    
+    int positions[] = {-2, -1, 0, 1, 2};
+    int xPositions[] = {10, 35, 60, 85, 110};
+    
+    int maxChars = numChars;
+    if (editField == EDIT_FROM || editField == EDIT_TO) {
+      maxChars = 26; // Only a-z for stations
+    }
+    
+    for (int i = 0; i < 5; i++) {
+      int idx = (editCharIndex + positions[i] + maxChars) % maxChars;
+      
+      if (positions[i] == 0) {
+        // Current character - highlighted
+        display.fillRect(xPositions[i] - 8, 38, 20, 18, SSD1306_WHITE);
+        display.setTextColor(SSD1306_BLACK);
+      } else {
+        display.setTextColor(SSD1306_WHITE);
+      }
+      
+      display.setCursor(xPositions[i] - 4, 40);
+      display.print(keyboardChars[idx]);
+    }
+    
+    // Instructions
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+    display.setCursor(2, 56);
+    display.print("Hold=Menu");
+  } else {
+    // Field selection mode
+    
+    // Handle encoder navigation
+    if (encoderPos != lastDisplayedPos) {
+      int diff = encoderPos - lastDisplayedPos;
+      editField += diff;
+      if (editField < 0) editField = EDIT_COUNT - 1;
+      if (editField >= EDIT_COUNT) editField = 0;
+      
+      lastDisplayedPos = encoderPos;
+    }
+    
+    // Title bar
+    display.fillRect(0, 0, SCREEN_WIDTH, 11, SSD1306_WHITE);
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_BLACK);
+    display.setCursor(2, 2);
+    display.print("Edit Route ");
+    display.print(editingPreset + 1);
+    
+    display.setTextColor(SSD1306_WHITE);
+    
+    // Field labels and values
+    String fieldNames[] = {"Name:", "From:", "To:", "< Save"};
+    int yPositions[] = {14, 26, 38, 52};
+    
+    for (int i = 0; i < EDIT_COUNT; i++) {
+      int yPos = yPositions[i];
+      
+      if (i == editField) {
+        display.setTextColor(SSD1306_BLACK);
+        display.fillRect(0, yPos - 1, SCREEN_WIDTH, 11, SSD1306_WHITE);
+      } else {
+        display.setTextColor(SSD1306_WHITE);
+      }
+      
+      display.setCursor(2, yPos);
+      display.print(fieldNames[i]);
+      
+      if (i != EDIT_SAVE) {
+        display.print(" ");
+        String* currentField = nullptr;
+        if (i == EDIT_NAME) currentField = &presets[editingPreset].name;
+        else if (i == EDIT_FROM) currentField = &presets[editingPreset].fromStation;
+        else if (i == EDIT_TO) currentField = &presets[editingPreset].toStation;
+        
+        if (currentField) {
+          String displayText = *currentField;
           displayText = displayText.substring(0, 10);
           display.print(displayText);
+          if (i == editField) {
+            display.print("_");
+          }
         }
       }
     }
@@ -1150,17 +1363,39 @@ void loop() {
 
 // ====== ENCODER INTERRUPT ======
 void IRAM_ATTR updateEncoder() {
+  // Debounce the encoder to prevent too-fast scrolling
+  unsigned long currentTime = millis();
+  if (currentTime - lastEncoderTime < encoderDebounce) {
+    return;
+  }
+  lastEncoderTime = currentTime;
+  
   int MSB = digitalRead(ENCODER_CLK);
   int LSB = digitalRead(ENCODER_DT);
   
   int encoded = (MSB << 1) | LSB;
   int sum = (lastEncoded << 2) | encoded;
   
+  int oldPos = encoderPos;
+  
   if (sum == 0b1101 || sum == 0b0100 || sum == 0b0010 || sum == 0b1011) {
-    encoderPos++;
+    encoderRawCount++;
   }
   if (sum == 0b1110 || sum == 0b0111 || sum == 0b0001 || sum == 0b1000) {
-    encoderPos--;
+    encoderRawCount--;
+  }
+  
+  // Only update position every 2 raw counts (one per detent/click)
+  encoderPos = encoderRawCount / 2;
+  
+  // Print encoder changes
+  if (encoderPos != oldPos) {
+    Serial.print("Encoder: ");
+    Serial.print(encoderPos);
+    Serial.print(" (change: ");
+    Serial.print(encoderPos > oldPos ? "+" : "");
+    Serial.print(encoderPos - oldPos);
+    Serial.println(")");
   }
   
   lastEncoded = encoded;
@@ -1186,7 +1421,7 @@ void handleButton() {
       if (buttonState == HIGH && !buttonHandled) {
         unsigned long pressDuration = millis() - buttonPressTime;
         
-        // Only trigger short press if long press wasn't already triggered
+        // Only trigger if long press wasn't already triggered
         if (!longPressTriggered && pressDuration < longPressTime) {
           Serial.println("Short press detected");
           handleShortPress();
