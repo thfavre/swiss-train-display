@@ -148,38 +148,40 @@ void ModalDialog::draw(DisplayManager& disp, const String& title, const String& 
   // Background
   d.fillRect(0, 0, SCREEN_WIDTH, SCREEN_HEIGHT, SSD1306_BLACK);
 
-  // Border
-  d.drawRect(2, 2, SCREEN_WIDTH - 4, SCREEN_HEIGHT - 4, SSD1306_WHITE);
+  // Border - full screen with 1px margin
+  d.drawRect(1, 1, SCREEN_WIDTH - 2, SCREEN_HEIGHT - 2, SSD1306_WHITE);
 
   // Title
   d.setTextSize(1);
   d.setTextColor(SSD1306_WHITE);
-  d.setCursor(4, 6);
+  d.setCursor(4, 5);
   d.print(title);
 
   // Content area
-  d.setCursor(4, 18);
+  d.setCursor(4, 16);
   d.print(content);
 
   // Separator line
-  d.drawLine(4, SCREEN_HEIGHT - 20, SCREEN_WIDTH - 4, SCREEN_HEIGHT - 20, SSD1306_WHITE);
+  d.drawLine(3, SCREEN_HEIGHT - 18, SCREEN_WIDTH - 3, SCREEN_HEIGHT - 18, SSD1306_WHITE);
 
-  // Buttons
-  int buttonWidth = 30;
-  int buttonSpacing = (SCREEN_WIDTH - (buttonCount * buttonWidth)) / (buttonCount + 1);
+  // Buttons - fit within border
+  int buttonWidth = (buttonCount <= 2) ? 40 : 24;
+  int totalButtonWidth = buttonCount * buttonWidth;
+  int availableSpace = SCREEN_WIDTH - 10;  // Leave margin for border
+  int buttonSpacing = max(2, (availableSpace - totalButtonWidth) / (buttonCount + 1));
 
   for (int i = 0; i < buttonCount; i++) {
-    int xPos = buttonSpacing + (i * (buttonWidth + buttonSpacing));
-    int yPos = SCREEN_HEIGHT - 14;
+    int xPos = 5 + buttonSpacing + (i * (buttonWidth + buttonSpacing));
+    int yPos = SCREEN_HEIGHT - 12;
 
     if (i == selectedButton) {
-      d.fillRect(xPos - 2, yPos - 2, buttonWidth, 12, SSD1306_WHITE);
+      d.fillRect(xPos, yPos - 2, buttonWidth, 10, SSD1306_WHITE);
       d.setTextColor(SSD1306_BLACK);
     } else {
       d.setTextColor(SSD1306_WHITE);
     }
 
-    d.setCursor(xPos, yPos);
+    d.setCursor(xPos + 2, yPos);
     d.print(buttons[i]);
   }
 }

@@ -74,10 +74,12 @@ void PasswordEntryScreen::draw() {
   } else {
     // Normal entry mode
     YellowBar::draw(*display, ssid.substring(0, 15));
-    TextInputDisplay::draw(*display, "Pass:", password, 18);
 
-    display->drawText("Select character:", 2, 28, 1);
-    CharacterSelector::draw(*display, KEYBOARD_CHARS, KEYBOARD_CHARS_COUNT, charIndex);
+    // Draw password input in blue zone (safely below y=16)
+    TextInputDisplay::draw(*display, "Pass:", password, 20);
+
+    display->drawText("Select character:", 2, 32, 1);
+    CharacterSelector::draw(*display, KEYBOARD_CHARS, KEYBOARD_CHARS_COUNT, charIndex, 42);
   }
 
   display->show();
