@@ -19,7 +19,11 @@ bool TrainAPI::fetchConnections(const String& from, const String& to, std::vecto
 
   Serial.printf("Fetching train data (limit=%d): %s\n", limit, url.c_str());
 
+#ifdef ESP8266
+  http.begin(wifiClient, url);
+#else
   http.begin(url);
+#endif
   http.setTimeout(7000);  // 7 second timeout for multiple connections
 
   int httpCode = http.GET();

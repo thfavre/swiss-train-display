@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(\"C:\\Users\\thoma\\.platformio\\penv\\Scripts\\platformio.exe\" run --environment esp8266mod)",
+      "Bash(\"C:\\Users\\thoma\\.platformio\\penv\\Scripts\\platformio.exe\" run --target upload --target monitor --environment esp8266mod)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

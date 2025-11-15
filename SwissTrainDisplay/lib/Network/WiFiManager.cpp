@@ -32,7 +32,11 @@ bool WiFiManager::scan() {
     WiFiNetwork network;
     network.ssid = WiFi.SSID(i);
     network.rssi = WiFi.RSSI(i);
+#ifdef ESP32
     network.isSecure = (WiFi.encryptionType(i) != WIFI_AUTH_OPEN);
+#elif defined(ESP8266)
+    network.isSecure = (WiFi.encryptionType(i) != AUTH_OPEN);
+#endif
 
     networks.push_back(network);
     Serial.printf("  %d: %s (%d dBm) %s\n",

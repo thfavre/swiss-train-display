@@ -4,11 +4,11 @@
 #include <Arduino.h>
 
 // ====== HARDWARE PINS ======
-#define I2C_SDA 8
-#define I2C_SCL 9
-#define ENCODER_CLK 4
-#define ENCODER_DT 5
-#define ENCODER_SW 6
+#define I2C_SDA 4
+#define I2C_SCL 5
+#define ENCODER_CLK 14
+#define ENCODER_DT 12
+#define ENCODER_SW 13
 
 // ====== DISPLAY SETTINGS ======
 #define SCREEN_WIDTH 128

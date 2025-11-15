@@ -2,7 +2,12 @@
 #define TRAINAPI_H
 
 #include <Arduino.h>
-#include <HTTPClient.h>
+#ifdef ESP32
+  #include <HTTPClient.h>
+#elif defined(ESP8266)
+  #include <ESP8266HTTPClient.h>
+  #include <WiFiClient.h>
+#endif
 #include <ArduinoJson.h>
 #include <vector>
 #include "../../include/Config.h"
@@ -11,6 +16,9 @@
 class TrainAPI {
 private:
   HTTPClient http;
+#ifdef ESP8266
+  WiFiClient wifiClient;
+#endif
   std::vector<TrainConnection> cachedConnections;
   String cachedFrom;
   String cachedTo;
