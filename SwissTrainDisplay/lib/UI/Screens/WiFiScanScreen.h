@@ -14,6 +14,9 @@ private:
   int selection;
   bool scanning;
 
+  void performScan();
+  int getTotalMenuItems() const;
+
 public:
   WiFiScanScreen(DisplayManager* disp, WiFiManager* wifiMgr, SettingsManager* settingsMgr);
 

@@ -35,7 +35,7 @@ void YellowBar::drawWithTime(DisplayManager& disp, const String& title) {
 
   // Draw time on right
   struct tm timeinfo;
-  if (getLocalTime(&timeinfo)) {
+  if (getLocalTime(&timeinfo, 100)) {  // 100ms timeout - don't block UI
     char timeStr[6];
     strftime(timeStr, sizeof(timeStr), "%H:%M", &timeinfo);
 

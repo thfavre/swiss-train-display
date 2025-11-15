@@ -7,12 +7,9 @@ MainScreen::MainScreen(DisplayManager* disp, PresetManager* presetMgr, TrainAPI*
 void MainScreen::enter() {
   Serial.println("Entering MainScreen");
 
-  // Fetch train data if we have a train preset and WiFi
-  const Preset* current = presets->getCurrent();
-  if (current && current->type == PRESET_TRAIN && wifi->isConnected()) {
-    TrainConnection conn;
-    trainAPI->fetchConnection(current->fromStation, current->toStation, conn);
-  }
+  // Don't fetch data here - it blocks for 1-5 seconds!
+  // Display will show cached data or "No data" message
+  // User can refresh from menu if needed
 }
 
 void MainScreen::exit() {
@@ -22,14 +19,11 @@ void MainScreen::exit() {
 void MainScreen::update() {
   const Preset* current = presets->getCurrent();
 
-  // Auto-refresh train data periodically
-  if (current && current->type == PRESET_TRAIN && wifi->isConnected()) {
-    if (!trainAPI->isCacheValid()) {
-      TrainConnection conn;
-      trainAPI->fetchConnection(current->fromStation, current->toStation, conn);
-      requestRedraw();  // Redraw when new data arrives
-    }
-  }
+  // NOTE: Removed auto-refresh to prevent UI blocking
+  // Train data is only fetched:
+  // - On startup
+  // - When manually refreshing from menu
+  // This keeps UI responsive
 
   // Clock needs to update every second
   if (current && current->type == PRESET_CLOCK) {
@@ -51,12 +45,9 @@ void MainScreen::handleEncoder(int delta) {
       presets->previous();
     }
 
-    // Fetch data for new preset
-    const Preset* current = presets->getCurrent();
-    if (current && current->type == PRESET_TRAIN && wifi->isConnected()) {
-      TrainConnection conn;
-      trainAPI->fetchConnection(current->fromStation, current->toStation, conn);
-    }
+    // Don't fetch data here - it blocks for 1-5 seconds!
+    // User can manually refresh from menu if needed
+    // This keeps preset switching instant
   }
 }
 

@@ -68,9 +68,48 @@ void PasswordEntryScreen::draw() {
   display->clear();
 
   if (showModal) {
-    // Show modal
+    // Custom confirmation modal layout
+    Adafruit_SSD1306& d = display->getDisplay();
+
+    // Yellow bar: "Connect to"
+    YellowBar::draw(*display, "Connect to");
+
+    // Blue zone: WiFi name (first 15 chars)
+    d.setTextSize(1);
+    d.setTextColor(SSD1306_WHITE);
+    d.setCursor(4, BLUE_ZONE_Y + 2);
+    d.print(ssid.substring(0, 15));
+
+    // Password line
+    d.setCursor(4, BLUE_ZONE_Y + 12);
+    d.print("Pass: ");
+    d.print(password);
+
+    // Separator line above buttons
+    d.drawLine(3, SCREEN_HEIGHT - 18, SCREEN_WIDTH - 3, SCREEN_HEIGHT - 18, SSD1306_WHITE);
+
+    // Buttons at bottom
     String buttons[] = {"Del", "Save", "Edit", "Exit"};
-    ModalDialog::draw(*display, "Connect to:", ssid + "\nPass: " + password, buttons, 4, modalSelection);
+    int buttonWidth = 24;
+    int buttonCount = 4;
+    int totalButtonWidth = buttonCount * buttonWidth;
+    int availableSpace = SCREEN_WIDTH - 10;
+    int buttonSpacing = max(2, (availableSpace - totalButtonWidth) / (buttonCount + 1));
+
+    for (int i = 0; i < buttonCount; i++) {
+      int xPos = 5 + buttonSpacing + (i * (buttonWidth + buttonSpacing));
+      int yPos = SCREEN_HEIGHT - 12;
+
+      if (i == modalSelection) {
+        d.fillRect(xPos, yPos - 2, buttonWidth, 10, SSD1306_WHITE);
+        d.setTextColor(SSD1306_BLACK);
+      } else {
+        d.setTextColor(SSD1306_WHITE);
+      }
+
+      d.setCursor(xPos + 2, yPos);
+      d.print(buttons[i]);
+    }
   } else {
     // Normal entry mode
     YellowBar::draw(*display, ssid.substring(0, 15));
