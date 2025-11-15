@@ -85,6 +85,7 @@ bool SettingsManager::savePreset(int index, const Preset& preset) {
   String keyFrom = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_from";
   String keyTo = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_to";
   String keyEnabled = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_enabled";
+  String keyTrainsCount = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_trains";
 
   bool success = true;
   success &= prefs.putString(keyName.c_str(), preset.name) > 0;
@@ -92,6 +93,7 @@ bool SettingsManager::savePreset(int index, const Preset& preset) {
   success &= prefs.putString(keyFrom.c_str(), preset.fromStation) > 0;
   success &= prefs.putString(keyTo.c_str(), preset.toStation) > 0;
   success &= prefs.putBool(keyEnabled.c_str(), preset.enabled);
+  success &= prefs.putUChar(keyTrainsCount.c_str(), preset.trainsToDisplay) > 0;
 
   if (success) {
     Serial.printf("Preset %d saved: %s\n", index, preset.name.c_str());
@@ -113,12 +115,14 @@ bool SettingsManager::loadPreset(int index, Preset& preset) {
   String keyFrom = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_from";
   String keyTo = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_to";
   String keyEnabled = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_enabled";
+  String keyTrainsCount = String(PREFS_KEY_PRESET_PREFIX) + String(index) + "_trains";
 
   preset.name = prefs.getString(keyName.c_str(), "");
   preset.type = (PresetType)prefs.getInt(keyType.c_str(), PRESET_TRAIN);
   preset.fromStation = prefs.getString(keyFrom.c_str(), "");
   preset.toStation = prefs.getString(keyTo.c_str(), "");
   preset.enabled = prefs.getBool(keyEnabled.c_str(), true);
+  preset.trainsToDisplay = prefs.getUChar(keyTrainsCount.c_str(), 1); // Default to 1 for backward compatibility
 
   bool exists = preset.name.length() > 0;
   if (exists) {

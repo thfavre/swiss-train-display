@@ -39,6 +39,8 @@ public:
   bool setCurrentIndex(int index);
   bool next();
   bool previous();
+  bool nextEnabled();     // Skip to next enabled preset
+  bool previousEnabled(); // Skip to previous enabled preset
 
   // Validation
   bool isValidIndex(int index) const;
@@ -48,6 +50,9 @@ public:
   void clear();
   bool hasDirtyFlag() const { return isDirty; }
   void clearDirtyFlag() { isDirty = false; }
+
+  // Get display name for a preset (auto-generate from stations if empty)
+  static String getDisplayName(const Preset& preset);
 };
 
 #endif // PRESETMANAGER_H

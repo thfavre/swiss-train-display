@@ -11,16 +11,16 @@ TrainAPI::~TrainAPI() {
 
 // ====== FETCH DATA ======
 
-bool TrainAPI::fetchConnection(const String& from, const String& to, TrainConnection& connection) {
+bool TrainAPI::fetchConnections(const String& from, const String& to, std::vector<TrainConnection>& connections, int limit) {
   clearError();
 
-  // Build URL
-  String url = String(API_BASE_URL) + "/connections?from=" + from + "&to=" + to + "&limit=1";
+  // Build URL with limit parameter
+  String url = String(API_BASE_URL) + "/connections?from=" + from + "&to=" + to + "&limit=" + String(limit);
 
-  Serial.println("Fetching train data: " + url);
+  Serial.printf("Fetching train data (limit=%d): %s\n", limit, url.c_str());
 
   http.begin(url);
-  http.setTimeout(5000);  // 5 second timeout
+  http.setTimeout(7000);  // 7 second timeout for multiple connections
 
   int httpCode = http.GET();
 
@@ -37,26 +37,36 @@ bool TrainAPI::fetchConnection(const String& from, const String& to, TrainConnec
   http.end();
 
   // Parse the response
-  if (!parseConnection(payload, connection)) {
+  if (!parseConnections(payload, connections, limit)) {
     Serial.println("Failed to parse train data");
     return false;
   }
 
   // Update cache
-  cachedConnection = connection;
+  cachedConnections = connections;
   cachedFrom = from;
   cachedTo = to;
   lastFetchTime = millis();
 
-  Serial.printf("Train data fetched: %s -> %s at %s\n",
-                from.c_str(), to.c_str(), connection.departureTime.c_str());
+  Serial.printf("Train data fetched: %d connections from %s -> %s\n",
+                connections.size(), from.c_str(), to.c_str());
 
   return true;
 }
 
+// Backward compatibility wrapper
+bool TrainAPI::fetchConnection(const String& from, const String& to, TrainConnection& connection) {
+  std::vector<TrainConnection> connections;
+  if (fetchConnections(from, to, connections, 1) && !connections.empty()) {
+    connection = connections[0];
+    return true;
+  }
+  return false;
+}
+
 // ====== PARSE JSON ======
 
-bool TrainAPI::parseConnection(const String& json, TrainConnection& connection) {
+bool TrainAPI::parseConnections(const String& json, std::vector<TrainConnection>& connections, int limit) {
   JsonDocument doc;
   DeserializationError error = deserializeJson(doc, json);
 
@@ -69,80 +79,90 @@ bool TrainAPI::parseConnection(const String& json, TrainConnection& connection) 
   }
 
   // Check if we have connections
-  JsonArray connections = doc["connections"];
-  if (connections.isNull() || connections.size() == 0) {
+  JsonArray connectionsArray = doc["connections"];
+  if (connectionsArray.isNull() || connectionsArray.size() == 0) {
     Serial.println("No connections found");
     lastError = ErrorInfo(ERROR_NO_CONNECTIONS, "No connections found", "");
     return false;
   }
 
-  JsonObject conn = connections[0];
-  if (conn.isNull()) {
-    Serial.println("Invalid connection data");
-    lastError = ErrorInfo(ERROR_API_PARSE, "Invalid connection data", "");
-    return false;
-  }
+  // Clear the output vector
+  connections.clear();
 
-  // Parse from/to
-  JsonObject from = conn["from"];
-  JsonObject to = conn["to"];
+  // Parse up to 'limit' connections
+  int count = min((int)connectionsArray.size(), limit);
+  for (int i = 0; i < count; i++) {
+    JsonObject conn = connectionsArray[i];
+    if (conn.isNull()) {
+      Serial.printf("Invalid connection data at index %d\n", i);
+      continue; // Skip invalid connections
+    }
 
-  if (from.isNull() || to.isNull()) {
-    Serial.println("Missing from/to data");
-    lastError = ErrorInfo(ERROR_API_PARSE, "Missing from/to data", "");
-    return false;
-  }
+    // Create new connection object
+    TrainConnection connection;
 
-  // Extract times
-  const char* depTime = from["departure"];
-  const char* arrTime = to["arrival"];
+    // Parse from/to
+    JsonObject from = conn["from"];
+    JsonObject to = conn["to"];
 
-  if (depTime == nullptr || arrTime == nullptr) {
-    Serial.println("Missing departure/arrival times");
-    lastError = ErrorInfo(ERROR_API_PARSE, "Missing times", "");
-    return false;
-  }
+    if (from.isNull() || to.isNull()) {
+      Serial.printf("Missing from/to data at index %d\n", i);
+      continue; // Skip this connection
+    }
 
-  connection.departureTime = extractTime(String(depTime));
-  connection.arrivalTime = extractTime(String(arrTime));
+    // Extract times
+    const char* depTime = from["departure"];
+    const char* arrTime = to["arrival"];
 
-  // Extract platform
-  const char* platform = from["platform"];
-  connection.platform = (platform != nullptr) ? String(platform) : "?";
+    if (depTime == nullptr || arrTime == nullptr) {
+      Serial.printf("Missing departure/arrival times at index %d\n", i);
+      continue; // Skip this connection
+    }
 
-  // Extract train info from first section
-  JsonArray sections = conn["sections"];
-  if (!sections.isNull() && sections.size() > 0) {
-    JsonObject section = sections[0];
-    JsonObject journey = section["journey"];
+    connection.departureTime = extractTime(String(depTime));
+    connection.arrivalTime = extractTime(String(arrTime));
 
-    if (!journey.isNull()) {
-      const char* category = journey["category"];
-      const char* number = journey["number"];
+    // Extract platform
+    const char* platform = from["platform"];
+    connection.platform = (platform != nullptr) ? String(platform) : "?";
 
-      if (category != nullptr && number != nullptr) {
-        connection.trainNumber = String(category) + " " + String(number);
+    // Extract train info from first section
+    JsonArray sections = conn["sections"];
+    if (!sections.isNull() && sections.size() > 0) {
+      JsonObject section = sections[0];
+      JsonObject journey = section["journey"];
+
+      if (!journey.isNull()) {
+        const char* category = journey["category"];
+        const char* number = journey["number"];
+
+        if (category != nullptr && number != nullptr) {
+          connection.trainNumber = String(category) + " " + String(number);
+        } else {
+          connection.trainNumber = "Unknown";
+        }
+
+        connection.isCancelled = false;
       } else {
-        connection.trainNumber = "Unknown";
+        // No journey info - might be a walking section or cancelled
+        connection.isCancelled = true;
+        connection.trainNumber = "";
       }
-
-      connection.isCancelled = false;
     } else {
-      // No journey info - might be a walking section or cancelled
       connection.isCancelled = true;
       connection.trainNumber = "";
     }
-  } else {
-    connection.isCancelled = true;
-    connection.trainNumber = "";
+
+    // Set delay (not provided by this API directly, could be enhanced)
+    connection.delayMinutes = 0;
+
+    connection.fetchTime = millis();
+
+    // Add to connections vector
+    connections.push_back(connection);
   }
 
-  // Set delay (not provided by this API directly, could be enhanced)
-  connection.delayMinutes = 0;
-
-  connection.fetchTime = millis();
-
-  return true;
+  return !connections.empty();
 }
 
 // ====== TIME EXTRACTION ======
@@ -167,12 +187,19 @@ String TrainAPI::extractTime(const String& isoTime) {
 
 // ====== CACHE MANAGEMENT ======
 
+TrainConnection TrainAPI::getCachedConnection() const {
+  if (cachedConnections.empty()) {
+    return TrainConnection();
+  }
+  return cachedConnections[0];
+}
+
 bool TrainAPI::isCacheValid(unsigned long maxAge) const {
-  if (cachedConnection.fetchTime == 0) {
+  if (cachedConnections.empty() || cachedConnections[0].fetchTime == 0) {
     return false;
   }
 
-  unsigned long age = millis() - cachedConnection.fetchTime;
+  unsigned long age = millis() - cachedConnections[0].fetchTime;
   return age < maxAge;
 }
 

@@ -4,20 +4,21 @@
 #include <Arduino.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <vector>
 #include "../../include/Config.h"
 #include "../../include/Types.h"
 
 class TrainAPI {
 private:
   HTTPClient http;
-  TrainConnection cachedConnection;
+  std::vector<TrainConnection> cachedConnections;
   String cachedFrom;
   String cachedTo;
   unsigned long lastFetchTime;
   ErrorInfo lastError;
 
-  // Parse JSON response into TrainConnection
-  bool parseConnection(const String& json, TrainConnection& connection);
+  // Parse JSON response into TrainConnections
+  bool parseConnections(const String& json, std::vector<TrainConnection>& connections, int limit);
 
   // Extract time from ISO format
   String extractTime(const String& isoTime);
@@ -27,11 +28,15 @@ public:
   ~TrainAPI();
 
   // Fetch train data
+  bool fetchConnections(const String& from, const String& to, std::vector<TrainConnection>& connections, int limit = 1);
+
+  // Backward compatibility - fetch single connection
   bool fetchConnection(const String& from, const String& to, TrainConnection& connection);
 
   // Get cached data
-  const TrainConnection& getCachedConnection() const { return cachedConnection; }
-  bool hasCachedData() const { return cachedConnection.fetchTime > 0; }
+  const std::vector<TrainConnection>& getCachedConnections() const { return cachedConnections; }
+  TrainConnection getCachedConnection() const; // Returns first connection or empty
+  bool hasCachedData() const { return !cachedConnections.empty() && cachedConnections[0].fetchTime > 0; }
   bool isCacheValid(unsigned long maxAge = TRAIN_FETCH_INTERVAL_MS) const;
 
   // Error handling

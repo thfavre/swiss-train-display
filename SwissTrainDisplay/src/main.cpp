@@ -113,8 +113,9 @@ void setup() {
       // Fetch initial train data if current preset is a train
       const Preset* current = presetManager->getCurrent();
       if (current && current->type == PRESET_TRAIN) {
-        TrainConnection conn;
-        trainAPI->fetchConnection(current->fromStation, current->toStation, conn);
+        std::vector<TrainConnection> connections;
+        int limit = current->trainsToDisplay;
+        trainAPI->fetchConnections(current->fromStation, current->toStation, connections, limit);
       }
     } else {
       Serial.println("WiFi connection failed");

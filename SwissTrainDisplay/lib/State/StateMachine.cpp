@@ -22,7 +22,7 @@ void StateMachine::begin() {
 
   // Create all screens
   screens[STATE_MAIN_DISPLAY] = new MainScreen(display, presets, trainAPI, wifi);
-  screens[STATE_MENU] = new MenuScreen(display, wifi);
+  screens[STATE_MENU] = new MenuScreen(display, wifi, presets, trainAPI);
   screens[STATE_SETTINGS] = new SettingsScreen(display);
   screens[STATE_WIFI_SCAN] = new WiFiScanScreen(display, wifi, settings);
   screens[STATE_WIFI_PASSWORD] = new PasswordEntryScreen(display, wifi, settings);
@@ -85,6 +85,22 @@ void StateMachine::update() {
         selectedSSID = network->ssid;
         PasswordEntryScreen* passwordScreen = (PasswordEntryScreen*)screens[STATE_WIFI_PASSWORD];
         passwordScreen->setSSID(selectedSSID);
+      }
+    }
+
+    if (currentState == STATE_PRESET_SELECT && nextState == STATE_PRESET_EDIT) {
+      // Pass preset selection or create mode to edit screen
+      PresetSelectScreen* presetSelect = (PresetSelectScreen*)currentScreen;
+      PresetEditScreen* presetEdit = (PresetEditScreen*)screens[STATE_PRESET_EDIT];
+
+      if (presetSelect->isInCreateMode()) {
+        // Creating new preset
+        PresetType type = presetSelect->getNewPresetType();
+        presetEdit->setCreateMode(type);
+      } else {
+        // Editing existing preset
+        int presetIndex = presetSelect->getSelectedPreset();
+        presetEdit->setEditingIndex(presetIndex);
       }
     }
 

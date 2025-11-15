@@ -15,11 +15,15 @@ private:
   bool showModal;
   int modalSelection;
   Preset editBuffer;
+  bool createMode;  // True when creating new preset, false when editing existing
+
+  int getFieldCount() const;  // Get number of editable fields based on preset type
 
 public:
   PresetEditScreen(DisplayManager* disp, PresetManager* presetMgr);
 
   void setEditingIndex(int index) { editingIndex = index; }
+  void setCreateMode(PresetType type);  // Enter create mode for new preset
 
   void enter() override;
   void exit() override;

@@ -227,6 +227,67 @@ bool PresetManager::previous() {
   return true;
 }
 
+bool PresetManager::nextEnabled() {
+  if (presets.empty()) {
+    return false;
+  }
+
+  int startIndex = currentPresetIndex;
+  int attempts = 0;
+
+  do {
+    currentPresetIndex = (currentPresetIndex + 1) % presets.size();
+    attempts++;
+
+    // If we've checked all presets and none are enabled, stay on current
+    if (attempts > (int)presets.size()) {
+      Serial.println("WARNING: No enabled presets found");
+      return false;
+    }
+
+    // If current preset is enabled, we're done
+    if (presets[currentPresetIndex].enabled) {
+      Serial.printf("Next enabled preset: %d (%s)\n", currentPresetIndex, presets[currentPresetIndex].name.c_str());
+      return true;
+    }
+  } while (currentPresetIndex != startIndex);
+
+  // No enabled preset found, stay on current
+  return false;
+}
+
+bool PresetManager::previousEnabled() {
+  if (presets.empty()) {
+    return false;
+  }
+
+  int startIndex = currentPresetIndex;
+  int attempts = 0;
+
+  do {
+    currentPresetIndex--;
+    if (currentPresetIndex < 0) {
+      currentPresetIndex = presets.size() - 1;
+    }
+    attempts++;
+
+    // If we've checked all presets and none are enabled, stay on current
+    if (attempts > (int)presets.size()) {
+      Serial.println("WARNING: No enabled presets found");
+      return false;
+    }
+
+    // If current preset is enabled, we're done
+    if (presets[currentPresetIndex].enabled) {
+      Serial.printf("Previous enabled preset: %d (%s)\n", currentPresetIndex, presets[currentPresetIndex].name.c_str());
+      return true;
+    }
+  } while (currentPresetIndex != startIndex);
+
+  // No enabled preset found, stay on current
+  return false;
+}
+
 // ====== VALIDATION ======
 
 bool PresetManager::isValidIndex(int index) const {
@@ -234,14 +295,19 @@ bool PresetManager::isValidIndex(int index) const {
 }
 
 bool PresetManager::validatePreset(const Preset& preset) const {
-  // Name must not be empty
-  if (preset.name.length() == 0) {
+  // For train presets, name is optional (will be auto-generated from stations)
+  // For other types, name is required
+  if (preset.type != PRESET_TRAIN && preset.name.length() == 0) {
     return false;
   }
 
   // Train presets must have from/to stations
   if (preset.type == PRESET_TRAIN) {
     if (preset.fromStation.length() == 0 || preset.toStation.length() == 0) {
+      return false;
+    }
+    // Trains to display must be between 1 and 4
+    if (preset.trainsToDisplay < 1 || preset.trainsToDisplay > 4) {
       return false;
     }
   }
@@ -256,4 +322,12 @@ void PresetManager::clear() {
   currentPresetIndex = 0;
   isDirty = true;
   Serial.println("All presets cleared");
+}
+
+String PresetManager::getDisplayName(const Preset& preset) {
+  // For train presets with empty names, auto-generate from stations
+  if (preset.type == PRESET_TRAIN && preset.name.length() == 0) {
+    return preset.fromStation + "->" + preset.toStation;
+  }
+  return preset.name;
 }

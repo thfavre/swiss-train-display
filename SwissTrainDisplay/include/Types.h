@@ -18,15 +18,16 @@ struct Preset {
   String fromStation;    // For train presets
   String toStation;      // For train presets
   bool enabled;          // Whether preset is active
+  uint8_t trainsToDisplay; // Number of trains to show (1-4), for train presets only
 
   // Constructor for easy initialization
-  Preset() : name(""), type(PRESET_TRAIN), fromStation(""), toStation(""), enabled(true) {}
+  Preset() : name(""), type(PRESET_TRAIN), fromStation(""), toStation(""), enabled(true), trainsToDisplay(1) {}
 
   Preset(String n, String from, String to)
-    : name(n), type(PRESET_TRAIN), fromStation(from), toStation(to), enabled(true) {}
+    : name(n), type(PRESET_TRAIN), fromStation(from), toStation(to), enabled(true), trainsToDisplay(1) {}
 
   Preset(String n, PresetType t)
-    : name(n), type(t), fromStation(""), toStation(""), enabled(true) {}
+    : name(n), type(t), fromStation(""), toStation(""), enabled(true), trainsToDisplay(1) {}
 };
 
 // ====== TRAIN DATA TYPES ======
