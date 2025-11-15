@@ -48,7 +48,7 @@ void PasswordEntryScreen::handleShortPress() {
         showModal = false;
         break;
       case 3: // Exit
-        requestState(STATE_WIFI_SCAN);
+        requestState(STATE_SETTINGS);
         break;
     }
   } else {
